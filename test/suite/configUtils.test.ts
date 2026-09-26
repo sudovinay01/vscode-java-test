@@ -4,6 +4,10 @@
 'use strict';
 
 import * as assert from 'assert';
+import * as path from 'path';
+import * as sinon from 'sinon';
+import { Uri, workspace } from 'vscode';
+import { resolveAdditionalTestSourcePaths } from '../../src/provider/testSourceProvider';
 import { WhenClauseEvaluationContext } from '../../src/utils/configUtils';
 
 suite('ConfigUtils Tests', () => {
@@ -97,5 +101,29 @@ suite('ConfigUtils Tests', () => {
         const context = new WhenClauseEvaluationContext(clause);
         assert.throws(() => context.evaluate(), SyntaxError);
     }));
+
+    test('Resolve additional test source paths from workspace config', () => {
+        const workspaceFolder = { uri: Uri.file(path.join('C:\\', 'workspace', 'project')), name: 'project', index: 0 } as any;
+        const getConfigurationStub = sinon.stub(workspace, 'getConfiguration').returns({
+            get: (key: string, defaultValue: unknown) => {
+                if (key === 'java.test.additionalTestSourcePaths') {
+                    return ['src/main/java', 'src/generated/test'];
+                }
+                return defaultValue;
+            },
+        } as any);
+
+        try {
+            const result = resolveAdditionalTestSourcePaths(workspaceFolder);
+
+            assert.deepStrictEqual(result.map((entry) => entry.testSourcePath), [
+                path.join('C:\\', 'workspace', 'project', 'src', 'main', 'java'),
+                path.join('C:\\', 'workspace', 'project', 'src', 'generated', 'test'),
+            ]);
+            assert.ok(result.every((entry) => entry.isStrict));
+        } finally {
+            getConfigurationStub.restore();
+        }
+    });
 
 });

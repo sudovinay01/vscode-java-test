@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import * as path from 'path';
-import { commands, DebugConfiguration, Event, Extension, ExtensionContext, extensions, TestItem, TestRunProfileKind, TextDocument, TextDocumentChangeEvent, TextEditor, Uri, window, workspace, WorkspaceFoldersChangeEvent } from 'vscode';
+import { commands, ConfigurationChangeEvent, DebugConfiguration, Event, Extension, ExtensionContext, extensions, TestItem, TestRunProfileKind, TextDocument, TextDocumentChangeEvent, TextEditor, Uri, window, workspace, WorkspaceFoldersChangeEvent } from 'vscode';
 import { dispose as disposeTelemetryWrapper, initializeFromJsonFile, instrumentOperation, instrumentOperationAsVsCodeCommand } from 'vscode-extension-telemetry-wrapper';
 import { navigateToTestOrTarget } from './commands/navigation/navigationCommands';
 import { generateTests } from './commands/generationCommands';
@@ -130,6 +130,14 @@ function registerComponents(context: ExtensionContext): void {
             if (await isTestJavaFile(e.document)) {
                 await updateItemForDocumentWithDebounce(e.document.uri);
             }
+        }),
+        workspace.onDidChangeConfiguration(async (e: ConfigurationChangeEvent) => {
+            if (!e.affectsConfiguration('java.test.additionalTestSourcePaths')) {
+                return;
+            }
+            testSourceProvider.clear();
+            createTestController();
+            await refreshExplorer();
         }),
         workspace.onDidChangeWorkspaceFolders(async (e: WorkspaceFoldersChangeEvent) => {
             for (const deletedFolder of e.removed) {

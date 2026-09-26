@@ -196,6 +196,15 @@
                     "description": "%configuration.java.test.defaultConfig.description%",
                     "scope": "resource"
                 },
+                "java.test.additionalTestSourcePaths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "%configuration.java.test.additionalTestSourcePaths.description%",
+                    "default": [],
+                    "scope": "resource"
+                },
                 "java.test.config": {
                     "type": [
                         "object",

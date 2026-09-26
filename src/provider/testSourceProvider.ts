@@ -21,7 +21,10 @@ class TestSourcePathProvider {
     }
 
     public async getTestSourcePath(workspaceFolder: WorkspaceFolder, containsGeneral: boolean = true): Promise<string[]> {
-        const testPaths: ITestSourcePath[] = await this.getTestPaths(workspaceFolder);
+        const testPaths: ITestSourcePath[] = mergeTestSourcePaths(
+            await this.getTestPaths(workspaceFolder),
+            resolveAdditionalTestSourcePaths(workspaceFolder),
+        );
 
         if (containsGeneral) {
             return testPaths.map((s: ITestSourcePath) => s.testSourcePath);
@@ -36,7 +39,10 @@ class TestSourcePathProvider {
         if (!workspaceFolder) {
             return false;
         }
-        const testPaths: ITestSourcePath[] = await this.getTestPaths(workspaceFolder);
+        const testPaths: ITestSourcePath[] = mergeTestSourcePaths(
+            await this.getTestPaths(workspaceFolder),
+            resolveAdditionalTestSourcePaths(workspaceFolder),
+        );
         const fsPath: string = uri.fsPath;
         for (const testPath of testPaths) {
             const relativePath: string = path.relative(testPath.testSourcePath, fsPath);
@@ -68,6 +74,30 @@ class TestSourcePathProvider {
 async function getTestSourcePaths(uri: string[]): Promise<ITestSourcePath[]> {
     return await executeJavaLanguageServerCommand<ITestSourcePath[]>(
         JavaTestRunnerDelegateCommands.GET_TEST_SOURCE_PATH, uri) || [];
+}
+
+function mergeTestSourcePaths(...pathSets: ITestSourcePath[][]): ITestSourcePath[] {
+    const merged: ITestSourcePath[] = [];
+    for (const pathSet of pathSets) {
+        for (const item of pathSet) {
+            if (!merged.some((candidate: ITestSourcePath) => candidate.testSourcePath === item.testSourcePath)) {
+                merged.push(item);
+            }
+        }
+    }
+    return merged;
+}
+
+export function resolveAdditionalTestSourcePaths(workspaceFolder: WorkspaceFolder): ITestSourcePath[] {
+    const configuredPaths: string[] = workspace.getConfiguration(undefined, workspaceFolder.uri)
+        .get<string[]>('java.test.additionalTestSourcePaths', []);
+
+    return configuredPaths
+        .filter((configuredPath: string) => !!configuredPath)
+        .map((configuredPath: string) => {
+            const normalizedPath: string = path.resolve(workspaceFolder.uri.fsPath, configuredPath);
+            return { testSourcePath: normalizedPath, isStrict: true };
+        });
 }
 
 interface ITestSourcePath {
