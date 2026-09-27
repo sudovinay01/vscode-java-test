@@ -51,10 +51,24 @@ export function creatTestProfile(name: string, kind: TestRunProfileKind): void {
     testController?.createRunProfile(name, kind, runHandler, false, runnableTag);
 }
 
-export async function refreshTestSourcePaths(): Promise<void> {
-    testSourceProvider.clear();
-    await refreshExplorer();
-    await startWatchingWorkspace();
+let refreshTestSourcePathsPromise: Promise<void> | undefined;
+let refreshTestSourcePathsRequested: boolean = false;
+
+export function refreshTestSourcePaths(): Promise<void> {
+    refreshTestSourcePathsRequested = true;
+    if (!refreshTestSourcePathsPromise) {
+        refreshTestSourcePathsPromise = (async () => {
+            while (refreshTestSourcePathsRequested) {
+                refreshTestSourcePathsRequested = false;
+                testSourceProvider.clear();
+                await refreshExplorer();
+                await startWatchingWorkspace();
+            }
+        })().finally(() => {
+            refreshTestSourcePathsPromise = undefined;
+        });
+    }
+    return refreshTestSourcePathsPromise;
 }
 
 export const loadChildren: (item: TestItem, token?: CancellationToken, force?: boolean) => Promise<void> = instrumentOperation('java.test.explorer.loadChildren', async (_operationId: string, item: TestItem, token?: CancellationToken, force: boolean = false) => {

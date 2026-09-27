@@ -91,6 +91,7 @@ class TestSourcePathProvider {
 }
 
 let additionalTestSourceOutputChannel: OutputChannel | undefined;
+const LARGE_ADDITIONAL_TEST_SOURCE_COUNT: number = 100;
 
 export function mergeTestSourcePaths(testPaths: ITestSourcePath[], additionalPaths: string[]): ITestSourcePath[] {
     const mergedPaths: ITestSourcePath[] = [];
@@ -153,12 +154,20 @@ export async function resolveAdditionalTestSourcePaths(workspacePath: string, co
             }
         } catch (error) {
             const message: string = error instanceof Error ? error.message : String(error);
-            additionalTestSourceOutputChannel ??= window.createOutputChannel('Test Runner for Java');
-            additionalTestSourceOutputChannel.appendLine(
-                `Failed to expand additional test source pattern "${configuredPath}": ${message}`);
+            logAdditionalTestSourceMessage(`Failed to expand additional test source pattern "${configuredPath}": ${message}`);
         }
     }
+
+    if (paths.length > LARGE_ADDITIONAL_TEST_SOURCE_COUNT) {
+        logAdditionalTestSourceMessage(
+            `Additional test source patterns matched ${paths.length} directories. Broad patterns may slow discovery.`);
+    }
     return paths;
+}
+
+function logAdditionalTestSourceMessage(message: string): void {
+    additionalTestSourceOutputChannel ??= window.createOutputChannel('Test Runner for Java');
+    additionalTestSourceOutputChannel.appendLine(message);
 }
 
 function addUniquePath(paths: string[], pathKeys: Set<string>, sourcePath: string): void {

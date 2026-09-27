@@ -5,7 +5,10 @@ import * as assert from 'assert';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
-import { ITestSourcePath, mergeTestSourcePaths, resolveAdditionalTestSourcePaths } from '../../src/provider/testSourceProvider';
+import * as sinon from 'sinon';
+import { RelativePattern, Uri, WorkspaceConfiguration, WorkspaceFolder, workspace } from 'vscode';
+import * as commandUtils from '../../src/utils/commandUtils';
+import { ITestSourcePath, mergeTestSourcePaths, resolveAdditionalTestSourcePaths, testSourceProvider } from '../../src/provider/testSourceProvider';
 
 suite('testSourceProvider', () => {
     test('returns no extra paths by default', async () => {
@@ -66,6 +69,41 @@ suite('testSourceProvider', () => {
 
             assert.deepStrictEqual(paths.sort(), sourceRoots.sort());
         } finally {
+            fse.removeSync(workspacePath);
+        }
+    });
+
+    test('includes additional source roots in file watcher patterns', async () => {
+        const workspacePath: string = fse.mkdtempSync(path.join(os.tmpdir(), 'java-test-source-paths-'));
+        const sourceRoots: string[] = [
+            path.join(workspacePath, 'modules', 'app', 'src', 'main', 'java'),
+            path.join(workspacePath, 'modules', 'cli', 'src', 'main', 'java'),
+        ];
+        sourceRoots.forEach((sourceRoot: string) => fse.ensureDirSync(sourceRoot));
+        const workspaceFolder: WorkspaceFolder = {
+            uri: Uri.file(workspacePath),
+            name: 'additional-source-paths-test',
+            index: 0,
+        };
+        const configuration: WorkspaceConfiguration = {
+            get: () => ['modules/*/src/main/java'],
+        } as unknown as WorkspaceConfiguration;
+
+        testSourceProvider.clear();
+        sinon.stub(workspace, 'getConfiguration').returns(configuration);
+        sinon.stub(commandUtils, 'executeJavaLanguageServerCommand').resolves([]);
+        try {
+            const patterns: RelativePattern[] = await testSourceProvider.getTestSourcePattern(workspaceFolder);
+
+            const normalizePath = (sourcePath: string): string => process.platform === 'win32'
+                ? path.normalize(sourcePath).toLowerCase()
+                : path.normalize(sourcePath);
+            assert.deepStrictEqual(
+                patterns.map((pattern: RelativePattern) => normalizePath(pattern.baseUri.fsPath)).sort(),
+                sourceRoots.map(normalizePath).sort());
+        } finally {
+            testSourceProvider.clear();
+            sinon.restore();
             fse.removeSync(workspacePath);
         }
     });

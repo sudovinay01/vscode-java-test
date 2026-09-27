@@ -56,6 +56,37 @@ suite('testController - loadChildren', () => {
         sinon.assert.callOrder(clearPathsStub, refreshExplorerStub, watcherPatternsStub, additionalPathsStub);
     });
 
+    test('serializes overlapping source-path refresh requests', async () => {
+        let releaseFirstRefresh!: () => void;
+        let signalFirstRefreshStarted!: () => void;
+        const firstRefreshStarted: Promise<void> = new Promise((resolve) => {
+            signalFirstRefreshStarted = resolve;
+        });
+        const firstRefreshGate: Promise<void> = new Promise((resolve) => {
+            releaseFirstRefresh = resolve;
+        });
+        const clearPathsStub = sinon.stub(testSourceProvider, 'clear');
+        const refreshExplorerStub = sinon.stub(testExplorerCommands, 'refreshExplorer').callsFake(async () => {
+            if (refreshExplorerStub.callCount === 1) {
+                signalFirstRefreshStarted();
+                await firstRefreshGate;
+            }
+        });
+        const watcherPatternsStub = sinon.stub(testSourceProvider, 'getTestSourcePattern').resolves([]);
+        const additionalPathsStub = sinon.stub(testSourceProvider, 'getAdditionalTestSourcePaths').resolves([]);
+
+        const firstRefresh: Promise<void> = refreshTestSourcePaths();
+        await firstRefreshStarted;
+        const overlappingRefresh: Promise<void> = refreshTestSourcePaths();
+        releaseFirstRefresh();
+        await Promise.all([firstRefresh, overlappingRefresh]);
+
+        assert.strictEqual(clearPathsStub.callCount, 2);
+        assert.strictEqual(refreshExplorerStub.callCount, 2);
+        assert.strictEqual(watcherPatternsStub.callCount, 2);
+        assert.strictEqual(additionalPathsStub.callCount, 2);
+    });
+
     test('scans Java files found under configured additional source roots', async () => {
         const javaFile: Uri = Uri.file('/workspace/additional/src/MainSourceTest.java');
         const refreshExplorerStub = sinon.stub(testExplorerCommands, 'refreshExplorer').resolves();
