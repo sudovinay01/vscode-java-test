@@ -2,12 +2,14 @@
 // Licensed under the MIT license.
 
 import * as path from 'path';
+import { glob, hasMagic } from 'glob';
 import { RelativePattern, Uri, workspace, WorkspaceFolder } from 'vscode';
 import { JavaTestRunnerDelegateCommands } from '../constants';
 import { executeJavaLanguageServerCommand } from '../utils/commandUtils';
 
 class TestSourcePathProvider {
     private testSourceMapping: Map<Uri, ITestSourcePath[]> = new Map();
+    private additionalTestSourceMapping: Map<Uri, Promise<string[]>> = new Map();
 
     public async getTestSourcePattern(workspaceFolder: WorkspaceFolder, containsGeneral: boolean = true): Promise<RelativePattern[]> {
         const patterns: RelativePattern[] = [];
@@ -31,10 +33,15 @@ class TestSourcePathProvider {
             .map((s: ITestSourcePath) => s.testSourcePath);
     }
 
-    public getAdditionalTestSourcePaths(workspaceFolder: WorkspaceFolder): string[] {
+    public getAdditionalTestSourcePaths(workspaceFolder: WorkspaceFolder): Promise<string[]> {
         const configuredPaths: string[] = workspace.getConfiguration('java.test', workspaceFolder.uri)
             .get<string[]>('additionalTestSourcePaths', []);
-        return resolveAdditionalTestSourcePaths(workspaceFolder.uri.fsPath, configuredPaths);
+        let resolvedPaths: Promise<string[]> | undefined = this.additionalTestSourceMapping.get(workspaceFolder.uri);
+        if (!resolvedPaths) {
+            resolvedPaths = resolveAdditionalTestSourcePaths(workspaceFolder.uri.fsPath, configuredPaths);
+            this.additionalTestSourceMapping.set(workspaceFolder.uri, resolvedPaths);
+        }
+        return resolvedPaths;
     }
 
     public async isOnTestSourcePath(uri: Uri): Promise<boolean> {
@@ -55,9 +62,11 @@ class TestSourcePathProvider {
 
     public clear(): void {
         this.testSourceMapping.clear();
+        this.additionalTestSourceMapping.clear();
     }
 
     public delete(workspaceUri: Uri): boolean {
+        this.additionalTestSourceMapping.delete(workspaceUri);
         return this.testSourceMapping.delete(workspaceUri);
     }
 
@@ -68,7 +77,7 @@ class TestSourcePathProvider {
             this.testSourceMapping.set(workspaceFolder.uri, testPaths);
         }
 
-        return mergeTestSourcePaths(testPaths, this.getAdditionalTestSourcePaths(workspaceFolder));
+        return mergeTestSourcePaths(testPaths, await this.getAdditionalTestSourcePaths(workspaceFolder));
     }
 }
 
@@ -101,7 +110,7 @@ export function mergeTestSourcePaths(testPaths: ITestSourcePath[], additionalPat
     return mergedPaths;
 }
 
-export function resolveAdditionalTestSourcePaths(workspacePath: string, configuredPaths: string[]): string[] {
+export async function resolveAdditionalTestSourcePaths(workspacePath: string, configuredPaths: string[]): Promise<string[]> {
     const paths: string[] = [];
     const pathKeys: Set<string> = new Set();
     for (const configuredPath of configuredPaths) {
@@ -109,14 +118,34 @@ export function resolveAdditionalTestSourcePaths(workspacePath: string, configur
             continue;
         }
 
-        const resolvedPath: string = path.resolve(workspacePath, configuredPath.trim());
-        const key: string = getPathKey(resolvedPath);
-        if (!pathKeys.has(key)) {
-            paths.push(resolvedPath);
-            pathKeys.add(key);
+        const normalizedPattern: string = configuredPath.trim().replace(/\\/g, '/');
+        const resolvedPattern: string = path.resolve(workspacePath, normalizedPattern);
+        if (!hasMagic(normalizedPattern)) {
+            addUniquePath(paths, pathKeys, resolvedPattern);
+            continue;
+        }
+
+        try {
+            const matches: { isDirectory(): boolean; fullpath(): string }[] =
+                await glob(resolvedPattern.replace(/\\/g, '/'), { withFileTypes: true });
+            for (const match of matches) {
+                if (match.isDirectory()) {
+                    addUniquePath(paths, pathKeys, match.fullpath());
+                }
+            }
+        } catch {
+            // Invalid or inaccessible patterns should not prevent test discovery for other paths.
         }
     }
     return paths;
+}
+
+function addUniquePath(paths: string[], pathKeys: Set<string>, sourcePath: string): void {
+    const key: string = getPathKey(sourcePath);
+    if (!pathKeys.has(key)) {
+        paths.push(sourcePath);
+        pathKeys.add(key);
+    }
 }
 
 function getPathKey(sourcePath: string): string {

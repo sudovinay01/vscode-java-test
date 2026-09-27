@@ -209,7 +209,7 @@ async function startWatchingWorkspace(): Promise<void> {
         }
 
         const scannedFiles: Set<string> = new Set();
-        for (const sourcePath of testSourceProvider.getAdditionalTestSourcePaths(workspaceFolder)) {
+        for (const sourcePath of await testSourceProvider.getAdditionalTestSourcePaths(workspaceFolder)) {
             let javaFiles: Uri[];
             try {
                 javaFiles = await workspace.findFiles(new RelativePattern(Uri.file(sourcePath), '**/*.java'));
