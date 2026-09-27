@@ -4,11 +4,13 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { CancellationTokenSource, TestController, TestItem, tests, Uri } from 'vscode';
-import { loadChildren } from '../../src/controller/testController';
+import { loadChildren, refreshTestSourcePaths } from '../../src/controller/testController';
 import { dataCache, invalidateResolutionVersion } from '../../src/controller/testItemDataCache';
 import * as controllerUtils from '../../src/controller/utils';
+import * as testExplorerCommands from '../../src/commands/testExplorerCommands';
 import { TestKind, TestLevel } from '../../src/java-test-runner.api';
 import { IJavaTestItem } from '../../src/types';
+import { testSourceProvider } from '../../src/provider/testSourceProvider';
 import { setupTestEnv } from './utils';
 
 function createTestItem(testController: TestController, id: string, testLevel: TestLevel,
@@ -41,6 +43,17 @@ suite('testController - loadChildren', () => {
     teardown(() => {
         sinon.restore();
         testController.dispose();
+    });
+
+    test('refreshes test source paths after clearing cached discovery paths', async () => {
+        const clearPathsStub = sinon.stub(testSourceProvider, 'clear');
+        const refreshExplorerStub = sinon.stub(testExplorerCommands, 'refreshExplorer').resolves();
+        const watcherPatternsStub = sinon.stub(testSourceProvider, 'getTestSourcePattern').resolves([]);
+        const additionalPathsStub = sinon.stub(testSourceProvider, 'getAdditionalTestSourcePaths').resolves([]);
+
+        await refreshTestSourcePaths();
+
+        sinon.assert.callOrder(clearPathsStub, refreshExplorerStub, watcherPatternsStub, additionalPathsStub);
     });
 
     test('should reuse resolved project children until a forced refresh', async () => {

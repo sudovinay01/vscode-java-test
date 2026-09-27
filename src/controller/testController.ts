@@ -41,15 +41,19 @@ export function createTestController(): void {
     testController.createRunProfile('Debug Tests', TestRunProfileKind.Debug, runHandler, true, runnableTag);
     testController.createRunProfile('Run Tests with Coverage', TestRunProfileKind.Coverage, runHandler, true, runnableTag);
 
-    testController.refreshHandler = () => {
-        refreshExplorer();
-    }
+    testController.refreshHandler = () => refreshTestSourcePaths();
 
     startWatchingWorkspace();
 }
 
 export function creatTestProfile(name: string, kind: TestRunProfileKind): void {
     testController?.createRunProfile(name, kind, runHandler, false, runnableTag);
+}
+
+export async function refreshTestSourcePaths(): Promise<void> {
+    testSourceProvider.clear();
+    await refreshExplorer();
+    await startWatchingWorkspace();
 }
 
 export const loadChildren: (item: TestItem, token?: CancellationToken, force?: boolean) => Promise<void> = instrumentOperation('java.test.explorer.loadChildren', async (_operationId: string, item: TestItem, token?: CancellationToken, force: boolean = false) => {
@@ -153,7 +157,7 @@ async function startWatchingWorkspace(): Promise<void> {
         return;
     }
 
-    for (const disposable of watchers) {
+    for (const disposable of watchers.splice(0)) {
         disposable.dispose();
     }
 
