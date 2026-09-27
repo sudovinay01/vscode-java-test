@@ -45,6 +45,7 @@ export async function activate(context: ExtensionContext): Promise<any> {
 export async function deactivate(): Promise<void> {
     disposeCodeActionProvider();
     await disposeTelemetryWrapper();
+    testSourceProvider.dispose();
     testController?.dispose();
     for (const disposable of watchers) {
         disposable.dispose();

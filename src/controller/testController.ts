@@ -27,6 +27,7 @@ import { parsePartsFromTestId } from '../utils/testItemUtils';
 export let testController: TestController | undefined;
 export const watchers: Disposable[] = [];
 export const runnableTag: TestTag = new TestTag('runnable');
+const MAX_ADDITIONAL_TEST_DISCOVERY_CONCURRENCY: number = 4;
 const pendingTestItemResolutions: WeakMap<TestItem, Promise<void>> = new WeakMap();
 
 export function createTestController(): void {
@@ -157,6 +158,7 @@ async function startWatchingWorkspace(): Promise<void> {
         return;
     }
 
+    // Remove disposed handles so repeated refreshes do not retain stale watchers.
     for (const disposable of watchers.splice(0)) {
         disposable.dispose();
     }
@@ -221,20 +223,41 @@ async function startWatchingWorkspace(): Promise<void> {
                 continue;
             }
 
+            const filesToScan: Uri[] = [];
             for (const javaFile of javaFiles) {
                 const fileKey: string = process.platform === 'win32' ? javaFile.fsPath.toLowerCase() : javaFile.fsPath;
                 if (scannedFiles.has(fileKey)) {
                     continue;
                 }
                 scannedFiles.add(fileKey);
+                filesToScan.push(javaFile);
+            }
 
-                const testTypes: IJavaTestItem[] = await findTestTypesAndMethods(javaFile.toString());
-                if (testTypes.length > 0) {
-                    await updateItemForDocument(javaFile, testTypes);
+            const discoveries: IAdditionalTestFileDiscovery[] = await discoverAdditionalTestTypes(filesToScan);
+            for (const discovery of discoveries) {
+                if (discovery.testTypes.length > 0) {
+                    await updateItemForDocument(discovery.uri, discovery.testTypes);
                 }
             }
         }
     }
+}
+
+export interface IAdditionalTestFileDiscovery {
+    uri: Uri;
+    testTypes: IJavaTestItem[];
+}
+
+export async function discoverAdditionalTestTypes(javaFiles: Uri[]): Promise<IAdditionalTestFileDiscovery[]> {
+    const discoveries: IAdditionalTestFileDiscovery[] = [];
+    for (const fileBatch of _.chunk(javaFiles, MAX_ADDITIONAL_TEST_DISCOVERY_CONCURRENCY)) {
+        const testTypesByFile: IJavaTestItem[][] = await Promise.all(fileBatch.map(
+            async (javaFile: Uri): Promise<IJavaTestItem[]> => await findTestTypesAndMethods(javaFile.toString())));
+        for (let index: number = 0; index < fileBatch.length; index++) {
+            discoveries.push({ uri: fileBatch[index], testTypes: testTypesByFile[index] });
+        }
+    }
+    return discoveries;
 }
 
 async function runHandler(request: TestRunRequest, token: CancellationToken): Promise<void> {

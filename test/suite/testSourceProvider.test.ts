@@ -13,28 +13,33 @@ suite('testSourceProvider', () => {
     });
 
     test('resolves multiple relative paths against the workspace folder', async () => {
-        const workspacePath: string = path.resolve('workspace');
-        const sourcePaths: string[] = await resolveAdditionalTestSourcePaths(workspacePath, [
-            path.join('src', 'main', 'java'),
-            path.join('src', 'integrationTest', 'java'),
-        ]);
+        const workspacePath: string = fse.mkdtempSync(path.join(os.tmpdir(), 'java-test-source-paths-'));
+        const relativePaths: string[] = [path.join('src', 'main', 'java'), path.join('src', 'integrationTest', 'java')];
+        relativePaths.forEach((relativePath: string) => fse.ensureDirSync(path.join(workspacePath, relativePath)));
+        try {
+            const sourcePaths: string[] = await resolveAdditionalTestSourcePaths(workspacePath, relativePaths);
 
-        assert.deepStrictEqual(sourcePaths, [
-            path.resolve(workspacePath, 'src', 'main', 'java'),
-            path.resolve(workspacePath, 'src', 'integrationTest', 'java'),
-        ]);
+            assert.deepStrictEqual(sourcePaths, relativePaths.map((relativePath: string) => path.resolve(workspacePath, relativePath)));
+        } finally {
+            fse.removeSync(workspacePath);
+        }
     });
 
     test('deduplicates equivalent Windows path spellings', async () => {
-        const workspacePath: string = path.resolve('workspace');
+        const workspacePath: string = fse.mkdtempSync(path.join(os.tmpdir(), 'java-test-source-paths-'));
         const relativePath: string = path.join('src', 'main', 'java');
-        const sourcePaths: string[] = await resolveAdditionalTestSourcePaths(workspacePath, [
-            relativePath,
-            relativePath.replace(/\\/g, '/'),
-            path.resolve(workspacePath, relativePath),
-        ]);
+        fse.ensureDirSync(path.resolve(workspacePath, relativePath));
+        try {
+            const sourcePaths: string[] = await resolveAdditionalTestSourcePaths(workspacePath, [
+                relativePath,
+                relativePath.replace(/\\/g, '/'),
+                path.resolve(workspacePath, relativePath),
+            ]);
 
-        assert.deepStrictEqual(sourcePaths, [path.resolve(workspacePath, relativePath)]);
+            assert.deepStrictEqual(sourcePaths, [path.resolve(workspacePath, relativePath)]);
+        } finally {
+            fse.removeSync(workspacePath);
+        }
     });
 
     test('merges an additional path already discovered by Java without duplicating it', () => {
@@ -87,6 +92,17 @@ suite('testSourceProvider', () => {
             const paths: string[] = await resolveAdditionalTestSourcePaths(workspacePath, [
                 'modules/*/src/test/java',
             ]);
+
+            assert.deepStrictEqual(paths, []);
+        } finally {
+            fse.removeSync(workspacePath);
+        }
+    });
+
+    test('ignores literal paths that do not exist as directories', async () => {
+        const workspacePath: string = fse.mkdtempSync(path.join(os.tmpdir(), 'java-test-source-paths-'));
+        try {
+            const paths: string[] = await resolveAdditionalTestSourcePaths(workspacePath, ['modules/missing/src/main/java']);
 
             assert.deepStrictEqual(paths, []);
         } finally {

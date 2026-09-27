@@ -3,8 +3,8 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { CancellationTokenSource, TestController, TestItem, tests, Uri } from 'vscode';
-import { loadChildren, refreshTestSourcePaths } from '../../src/controller/testController';
+import { CancellationTokenSource, TestController, TestItem, tests, Uri, workspace } from 'vscode';
+import { discoverAdditionalTestTypes, loadChildren, refreshTestSourcePaths } from '../../src/controller/testController';
 import { dataCache, invalidateResolutionVersion } from '../../src/controller/testItemDataCache';
 import * as controllerUtils from '../../src/controller/utils';
 import * as testExplorerCommands from '../../src/commands/testExplorerCommands';
@@ -54,6 +54,47 @@ suite('testController - loadChildren', () => {
         await refreshTestSourcePaths();
 
         sinon.assert.callOrder(clearPathsStub, refreshExplorerStub, watcherPatternsStub, additionalPathsStub);
+    });
+
+    test('scans Java files found under configured additional source roots', async () => {
+        const javaFile: Uri = Uri.file('/workspace/additional/src/MainSourceTest.java');
+        const refreshExplorerStub = sinon.stub(testExplorerCommands, 'refreshExplorer').resolves();
+        const watcherPatternsStub = sinon.stub(testSourceProvider, 'getTestSourcePattern').resolves([]);
+        const additionalPathsStub = sinon.stub(testSourceProvider, 'getAdditionalTestSourcePaths')
+            .resolves(['/workspace/additional/src']);
+        const findFilesStub = sinon.stub(workspace, 'findFiles').resolves([javaFile]);
+        const findTestsStub = sinon.stub(controllerUtils, 'findTestTypesAndMethods').resolves([]);
+
+        await refreshTestSourcePaths();
+
+        assert.ok(refreshExplorerStub.calledOnce);
+        assert.ok(watcherPatternsStub.calledOnce);
+        assert.ok(additionalPathsStub.calledOnce);
+        assert.ok(findFilesStub.calledOnce);
+        sinon.assert.calledOnceWithExactly(findTestsStub, javaFile.toString());
+    });
+
+    test('bounds concurrent additional-source discovery and preserves result order', async () => {
+        let activeRequests: number = 0;
+        let maximumActiveRequests: number = 0;
+        const findTestsStub = sinon.stub(controllerUtils, 'findTestTypesAndMethods').callsFake(async () => {
+            activeRequests++;
+            maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+            await new Promise<void>((resolve) => setTimeout(resolve, 5));
+            activeRequests--;
+            return [];
+        });
+        const javaFiles: Uri[] = [];
+        for (let index: number = 0; index < 10; index++) {
+            javaFiles.push(Uri.file(`/workspace/src/Test${index}.java`));
+        }
+
+        const discoveries = await discoverAdditionalTestTypes(javaFiles);
+
+        assert.strictEqual(findTestsStub.callCount, javaFiles.length);
+        assert.strictEqual(maximumActiveRequests, 4);
+        assert.deepStrictEqual(discoveries.map((discovery) => discovery.uri.toString()),
+            javaFiles.map((javaFile: Uri) => javaFile.toString()));
     });
 
     test('should reuse resolved project children until a forced refresh', async () => {

@@ -2,14 +2,15 @@
 // Licensed under the MIT license.
 
 import * as path from 'path';
+import * as fse from 'fs-extra';
 import { glob, hasMagic } from 'glob';
-import { RelativePattern, Uri, workspace, WorkspaceFolder } from 'vscode';
+import { OutputChannel, RelativePattern, Uri, window, workspace, WorkspaceFolder } from 'vscode';
 import { JavaTestRunnerDelegateCommands } from '../constants';
 import { executeJavaLanguageServerCommand } from '../utils/commandUtils';
 
 class TestSourcePathProvider {
-    private testSourceMapping: Map<Uri, ITestSourcePath[]> = new Map();
-    private additionalTestSourceMapping: Map<Uri, Promise<string[]>> = new Map();
+    private testSourceMapping: Map<string, ITestSourcePath[]> = new Map();
+    private additionalTestSourceMapping: Map<string, Promise<string[]>> = new Map();
 
     public async getTestSourcePattern(workspaceFolder: WorkspaceFolder, containsGeneral: boolean = true): Promise<RelativePattern[]> {
         const patterns: RelativePattern[] = [];
@@ -36,10 +37,11 @@ class TestSourcePathProvider {
     public getAdditionalTestSourcePaths(workspaceFolder: WorkspaceFolder): Promise<string[]> {
         const configuredPaths: string[] = workspace.getConfiguration('java.test', workspaceFolder.uri)
             .get<string[]>('additionalTestSourcePaths', []);
-        let resolvedPaths: Promise<string[]> | undefined = this.additionalTestSourceMapping.get(workspaceFolder.uri);
+        const workspaceKey: string = workspaceFolder.uri.toString();
+        let resolvedPaths: Promise<string[]> | undefined = this.additionalTestSourceMapping.get(workspaceKey);
         if (!resolvedPaths) {
             resolvedPaths = resolveAdditionalTestSourcePaths(workspaceFolder.uri.fsPath, configuredPaths);
-            this.additionalTestSourceMapping.set(workspaceFolder.uri, resolvedPaths);
+            this.additionalTestSourceMapping.set(workspaceKey, resolvedPaths);
         }
         return resolvedPaths;
     }
@@ -66,20 +68,29 @@ class TestSourcePathProvider {
     }
 
     public delete(workspaceUri: Uri): boolean {
-        this.additionalTestSourceMapping.delete(workspaceUri);
-        return this.testSourceMapping.delete(workspaceUri);
+        const workspaceKey: string = workspaceUri.toString();
+        this.additionalTestSourceMapping.delete(workspaceKey);
+        return this.testSourceMapping.delete(workspaceKey);
+    }
+
+    public dispose(): void {
+        additionalTestSourceOutputChannel?.dispose();
+        additionalTestSourceOutputChannel = undefined;
     }
 
     private async getTestPaths(workspaceFolder: WorkspaceFolder): Promise<ITestSourcePath[]> {
-        let testPaths: ITestSourcePath[] | undefined = this.testSourceMapping.get(workspaceFolder.uri);
+        const workspaceKey: string = workspaceFolder.uri.toString();
+        let testPaths: ITestSourcePath[] | undefined = this.testSourceMapping.get(workspaceKey);
         if (!testPaths) {
             testPaths = await getTestSourcePaths([workspaceFolder.uri.toString()]);
-            this.testSourceMapping.set(workspaceFolder.uri, testPaths);
+            this.testSourceMapping.set(workspaceKey, testPaths);
         }
 
         return mergeTestSourcePaths(testPaths, await this.getAdditionalTestSourcePaths(workspaceFolder));
     }
 }
+
+let additionalTestSourceOutputChannel: OutputChannel | undefined;
 
 export function mergeTestSourcePaths(testPaths: ITestSourcePath[], additionalPaths: string[]): ITestSourcePath[] {
     const mergedPaths: ITestSourcePath[] = [];
@@ -121,7 +132,14 @@ export async function resolveAdditionalTestSourcePaths(workspacePath: string, co
         const normalizedPattern: string = configuredPath.trim().replace(/\\/g, '/');
         const resolvedPattern: string = path.resolve(workspacePath, normalizedPattern);
         if (!hasMagic(normalizedPattern)) {
-            addUniquePath(paths, pathKeys, resolvedPattern);
+            try {
+                const stats: fse.Stats = await fse.stat(resolvedPattern);
+                if (stats.isDirectory()) {
+                    addUniquePath(paths, pathKeys, resolvedPattern);
+                }
+            } catch {
+                // Ignore missing or inaccessible literal paths.
+            }
             continue;
         }
 
@@ -133,8 +151,11 @@ export async function resolveAdditionalTestSourcePaths(workspacePath: string, co
                     addUniquePath(paths, pathKeys, match.fullpath());
                 }
             }
-        } catch {
-            // Invalid or inaccessible patterns should not prevent test discovery for other paths.
+        } catch (error) {
+            const message: string = error instanceof Error ? error.message : String(error);
+            additionalTestSourceOutputChannel ??= window.createOutputChannel('Test Runner for Java');
+            additionalTestSourceOutputChannel.appendLine(
+                `Failed to expand additional test source pattern "${configuredPath}": ${message}`);
         }
     }
     return paths;
