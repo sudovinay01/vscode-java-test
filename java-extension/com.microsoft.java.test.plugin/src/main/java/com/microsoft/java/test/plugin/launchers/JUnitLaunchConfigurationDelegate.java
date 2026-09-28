@@ -192,7 +192,7 @@ public class JUnitLaunchConfigurationDelegate extends org.eclipse.jdt.junit.laun
                 arguments.add(fileName);
             } else {
                 arguments.add("-test");
-                arguments.add(resolveMethodTestName(this.args.testNames[0]));
+                arguments.add(resolveMethodTestName(this.args.testNames[0], getExecutionClassName(0)));
 
                 if (StringUtils.isNotBlank(this.args.uniqueId)) {
                     arguments.add("-uniqueId");
@@ -202,7 +202,7 @@ public class JUnitLaunchConfigurationDelegate extends org.eclipse.jdt.junit.laun
         }
     }
 
-    private String resolveMethodTestName(String handleId) throws CoreException {
+    private String resolveMethodTestName(String handleId, String executionClassName) throws CoreException {
         final IMethod method = (IMethod) JavaCore.create(handleId);
         String testName = method.getElementName();
         if ((this.args.testKind == TestKind.JUnit5 || this.args.testKind == TestKind.JUnit6) &&
@@ -239,7 +239,14 @@ public class JUnitLaunchConfigurationDelegate extends org.eclipse.jdt.junit.laun
                 testName += "(" + String.join(",", parameters) + ")";
             }
         }
-        return method.getDeclaringType().getFullyQualifiedName() + ':' + testName;
+        final String className = StringUtils.isNotBlank(executionClassName) ? executionClassName :
+                method.getDeclaringType().getFullyQualifiedName();
+        return className + ':' + testName;
+    }
+
+    private String getExecutionClassName(int index) {
+        return this.args.executionClassNames != null && index < this.args.executionClassNames.length ?
+                this.args.executionClassNames[index] : null;
     }
 
     private String createTestNamesFile(String[] testNames) throws CoreException {
@@ -266,8 +273,8 @@ public class JUnitLaunchConfigurationDelegate extends org.eclipse.jdt.junit.laun
             file.deleteOnExit();
             try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(
                         new FileOutputStream(file), StandardCharsets.UTF_8));) {
-                for (final String handleId : testNames) {
-                    bw.write(resolveMethodTestName(handleId));
+                for (int index = 0; index < testNames.length; index++) {
+                    bw.write(resolveMethodTestName(testNames[index], getExecutionClassName(index)));
                     bw.newLine();
                 }
             }

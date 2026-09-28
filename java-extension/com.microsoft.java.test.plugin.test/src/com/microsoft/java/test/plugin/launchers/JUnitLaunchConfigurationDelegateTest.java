@@ -28,6 +28,7 @@ import org.eclipse.jdt.core.JavaCore;
 import org.junit.Test;
 
 import com.microsoft.java.test.plugin.AbstractProjectsManagerBasedTest;
+import com.microsoft.java.test.plugin.WorkspaceHelper;
 import com.microsoft.java.test.plugin.model.Response;
 import com.google.gson.Gson;
 
@@ -81,5 +82,29 @@ public class JUnitLaunchConfigurationDelegateTest extends AbstractProjectsManage
         assertTrue(vmArguments.contains(secondPackageOpen));
         assertEquals("--add-opens", vmArguments.get(vmArguments.indexOf(secondPackageOpen) - 1));
     }
+
+        @Test
+        public void testInheritedMethodLaunchesAgainstChildClass() throws Exception {
+                importProjects(Arrays.asList("inheritance-parent", "inheritance-child"));
+                final IProject childProject = WorkspaceHelper.getProject("inheritance-child");
+                final IJavaProject childJavaProject = JavaCore.create(childProject);
+                final IType parentType = JavaCore.create(WorkspaceHelper.getProject("inheritance-parent"))
+                                .findType("example.InheritanceBaseTest");
+
+                final Map<String, Object> request = new LinkedHashMap<>();
+                request.put("projectName", childProject.getName());
+                request.put("testLevel", 6);
+                request.put("testKind", 0);
+                request.put("testNames", Arrays.asList(parentType.getMethod("base", new String[0]).getHandleIdentifier()));
+                request.put("executionClassNames", Arrays.asList("example.InheritanceChildTest"));
+
+                final Response<JUnitLaunchArguments> response = JUnitLaunchUtils.resolveLaunchArgument(
+                                Arrays.asList(new Gson().toJson(request)), new NullProgressMonitor());
+
+                assertEquals(0, response.getStatus());
+                assertEquals(childJavaProject.getElementName(), response.getBody().projectName);
+                assertTrue(Arrays.asList(response.getBody().programArguments)
+                                .contains("example.InheritanceChildTest:base"));
+        }
 
 }

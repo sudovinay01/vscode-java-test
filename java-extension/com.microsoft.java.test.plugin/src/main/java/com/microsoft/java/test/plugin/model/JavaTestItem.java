@@ -37,6 +37,8 @@ public class JavaTestItem {
 
     private String jdtHandler;
 
+    private String executionClassName;
+
     /**
      * Optional field for project item.
      */
@@ -83,6 +85,14 @@ public class JavaTestItem {
 
     public void setJdtHandler(String jdtHandler) {
         this.jdtHandler = jdtHandler;
+    }
+
+    public String getExecutionClassName() {
+        return executionClassName;
+    }
+
+    public void setExecutionClassName(String executionClassName) {
+        this.executionClassName = executionClassName;
     }
 
     public String getId() {

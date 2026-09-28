@@ -572,11 +572,12 @@ public class TestSearchUtils {
             return;
         }
 
-        final Set<String> seenSignatures = new HashSet<>();
+        final Map<String, IMethodBinding> moreSpecificMethods = new HashMap<>();
         for (final IMethodBinding declared : classBinding.getDeclaredMethods()) {
-            seenSignatures.add(getMethodSignatureKey(declared));
+            moreSpecificMethods.put(getMethodSignatureKey(declared), declared);
         }
 
+        final Set<String> inheritedTestSignatures = new HashSet<>();
         ITypeBinding superClass = classBinding.getSuperclass();
         while (superClass != null && !"java.lang.Object".equals(superClass.getBinaryName())) {
             for (final IMethodBinding methodBinding : superClass.getDeclaredMethods()) {
@@ -584,23 +585,33 @@ public class TestSearchUtils {
                     continue;
                 }
                 final String key = getMethodSignatureKey(methodBinding);
-                if (!seenSignatures.add(key)) {
+                if (inheritedTestSignatures.contains(key)) {
                     continue;
                 }
+                final IMethodBinding overridingMethod = moreSpecificMethods.get(key);
                 for (final TestFrameworkSearcher searcher : searchers) {
-                    if (searcher.isTestMethod(methodBinding)) {
-                        final IJavaElement element = methodBinding.getJavaElement();
-                        if (element == null) {
-                            break;
-                        }
-                        final JavaTestItem methodItem = new JavaTestItemBuilder().setJavaElement(element)
-                                .setLevel(TestLevel.METHOD)
-                                .setKind(searcher.getTestKind())
-                                .build();
-                        rebaseMethodItemToChild(methodItem, childType);
-                        accumulator.add(methodItem);
+                    if (!searcher.isTestMethod(methodBinding)) {
+                        continue;
+                    }
+                    if (overridingMethod != null &&
+                            (searcher.getTestKind() != TestKind.JUnit || searcher.isTestMethod(overridingMethod))) {
                         break;
                     }
+                    final IJavaElement element = methodBinding.getJavaElement();
+                    if (element == null) {
+                        break;
+                    }
+                    final JavaTestItem methodItem = new JavaTestItemBuilder().setJavaElement(element)
+                            .setLevel(TestLevel.METHOD)
+                            .setKind(searcher.getTestKind())
+                            .build();
+                    rebaseMethodItemToChild(methodItem, childType);
+                    accumulator.add(methodItem);
+                    inheritedTestSignatures.add(key);
+                    break;
+                }
+                if (overridingMethod == null) {
+                    moreSpecificMethods.put(key, methodBinding);
                 }
             }
             superClass = superClass.getSuperclass();
@@ -629,11 +640,11 @@ public class TestSearchUtils {
             return;
         }
         final String childFullName = childType.getFullyQualifiedName() + fullName.substring(separator);
-        if (childFullName.equals(fullName)) {
-            return;
-        }
         methodItem.setFullName(childFullName);
-        methodItem.setId(methodItem.getProjectName() + "@" + childFullName);
+        final String childProjectName = childType.getJavaProject().getProject().getName();
+        methodItem.setProjectName(childProjectName);
+        methodItem.setId(childProjectName + "@" + childFullName);
+        methodItem.setExecutionClassName(childType.getFullyQualifiedName());
     }
 
     /**
