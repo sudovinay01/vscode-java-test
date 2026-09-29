@@ -23,6 +23,7 @@ import java.util.Map;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.jdt.core.IJavaProject;
+import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaCore;
 import org.junit.Test;
@@ -30,6 +31,8 @@ import org.junit.Test;
 import com.microsoft.java.test.plugin.AbstractProjectsManagerBasedTest;
 import com.microsoft.java.test.plugin.WorkspaceHelper;
 import com.microsoft.java.test.plugin.model.Response;
+import com.microsoft.java.test.plugin.model.JavaTestItem;
+import com.microsoft.java.test.plugin.util.TestSearchUtils;
 import com.google.gson.Gson;
 
 public class JUnitLaunchConfigurationDelegateTest extends AbstractProjectsManagerBasedTest {
@@ -106,5 +109,63 @@ public class JUnitLaunchConfigurationDelegateTest extends AbstractProjectsManage
                 assertTrue(Arrays.asList(response.getBody().programArguments)
                                 .contains("example.InheritanceChildTest:base"));
         }
+
+    @Test
+    public void testBinaryMethodWithParametersLaunchesAgainstChildClass() throws Exception {
+        final IProject project = importProjects("preview-junit").get(0);
+        final IJavaProject javaProject = JavaCore.create(project);
+        final IType assertions = javaProject.findType("org.junit.jupiter.api.Assertions");
+        assertNotNull(assertions);
+        final IMethod binaryMethod = assertions.getMethod("assertEquals",
+                new String[] { "Ljava.lang.Object;", "Ljava.lang.Object;" });
+        assertTrue(binaryMethod.exists());
+        assertTrue(binaryMethod.getCompilationUnit() == null);
+
+        final Map<String, Object> request = new LinkedHashMap<>();
+        request.put("projectName", javaProject.getElementName());
+        request.put("testLevel", 6);
+        request.put("testKind", 0);
+        request.put("testNames", Arrays.asList(binaryMethod.getHandleIdentifier()));
+        request.put("executionClassNames", Arrays.asList("example.InheritanceChildTest"));
+
+        final Response<JUnitLaunchArguments> response = JUnitLaunchUtils.resolveLaunchArgument(
+                Arrays.asList(new Gson().toJson(request)), new NullProgressMonitor());
+
+        assertEquals(0, response.getStatus());
+        assertTrue(Arrays.asList(response.getBody().programArguments)
+                .contains("example.InheritanceChildTest:assertEquals(java.lang.Object,java.lang.Object)"));
+    }
+
+    @Test
+    public void testInheritedBinaryMethodWithParametersLaunchesAgainstChildClass() throws Exception {
+        importProjects(Arrays.asList("inheritance-binary-parent", "inheritance-binary-child"));
+        final IJavaProject javaProject = JavaCore.create(WorkspaceHelper.getProject("inheritance-binary-child"));
+        final IType childType = javaProject.findType("example.InheritanceBinaryChildTest");
+        assertNotNull(childType);
+
+        final List<JavaTestItem> methods = TestSearchUtils.findDirectTestChildrenForClass(
+                Arrays.asList(childType.getHandleIdentifier()), new NullProgressMonitor());
+        final JavaTestItem inherited = methods.stream()
+                .filter(item -> item.getFullName().contains("#base"))
+                .findFirst().orElse(null);
+        assertNotNull(inherited);
+        final IMethod binaryMethod = (IMethod)
+                JavaCore.create(inherited.getJdtHandler());
+        assertTrue(binaryMethod.getCompilationUnit() == null);
+
+        final Map<String, Object> request = new LinkedHashMap<>();
+        request.put("projectName", javaProject.getElementName());
+        request.put("testLevel", 6);
+        request.put("testKind", 0);
+        request.put("testNames", Arrays.asList(inherited.getJdtHandler()));
+        request.put("executionClassNames", Arrays.asList("example.InheritanceBinaryChildTest"));
+
+        final Response<JUnitLaunchArguments> response = JUnitLaunchUtils.resolveLaunchArgument(
+                Arrays.asList(new Gson().toJson(request)), new NullProgressMonitor());
+
+        assertEquals(0, response.getStatus());
+        assertTrue(Arrays.asList(response.getBody().programArguments)
+                .contains("example.InheritanceBinaryChildTest:base(org.junit.jupiter.api.TestInfo)"));
+    }
 
 }

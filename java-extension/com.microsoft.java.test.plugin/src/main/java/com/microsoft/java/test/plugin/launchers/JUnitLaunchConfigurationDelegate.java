@@ -34,7 +34,11 @@ import org.eclipse.jdt.core.IMember;
 import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.core.dom.AST;
+import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.IBinding;
+import org.eclipse.jdt.core.dom.IMethodBinding;
 import org.eclipse.jdt.core.dom.ITypeBinding;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
@@ -209,39 +213,56 @@ public class JUnitLaunchConfigurationDelegate extends org.eclipse.jdt.junit.laun
                 method.getParameters().length > 0) {
             final ICompilationUnit unit = method.getCompilationUnit();
             if (unit == null) {
-                throw new CoreException(new Status(IStatus.ERROR, JUnitPlugin.PLUGIN_ID, IStatus.ERROR,
-                        "Cannot get compilation unit of method" + method.getElementName(), null)); //$NON-NLS-1$
-            }
-            final CompilationUnit root = (CompilationUnit) TestSearchUtils.parseToAst(unit,
-                    false /*fromCache*/, new NullProgressMonitor());
-            final MethodDeclaration methodDeclaration = ASTNodeSearchUtil.getMethodDeclarationNode(method, root);
-            if (methodDeclaration == null) {
-                throw new CoreException(new Status(IStatus.ERROR, JUnitPlugin.PLUGIN_ID, IStatus.ERROR,
-                        "Cannot get method declaration of method" + method.getElementName(), null)); //$NON-NLS-1$
-            }
+                final ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
+                parser.setProject(method.getJavaProject());
+                final IBinding[] bindings = parser.createBindings(new IJavaElement[] { method },
+                        new NullProgressMonitor());
+                if (bindings.length != 1 || !(bindings[0] instanceof IMethodBinding)) {
+                    throw new CoreException(new Status(IStatus.ERROR, JUnitPlugin.PLUGIN_ID, IStatus.ERROR,
+                            "Cannot resolve binary method " + method.getElementName(), null)); //$NON-NLS-1$
+                }
+                testName += formatParameterTypes((IMethodBinding) bindings[0]);
+            } else {
+                final CompilationUnit root = (CompilationUnit) TestSearchUtils.parseToAst(unit,
+                        false /*fromCache*/, new NullProgressMonitor());
+                final MethodDeclaration methodDeclaration = ASTNodeSearchUtil.getMethodDeclarationNode(method, root);
+                if (methodDeclaration == null) {
+                    throw new CoreException(new Status(IStatus.ERROR, JUnitPlugin.PLUGIN_ID, IStatus.ERROR,
+                            "Cannot get method declaration of method" + method.getElementName(), null)); //$NON-NLS-1$
+                }
 
-            final List<String> parameters = new LinkedList<>();
-            for (final Object obj : methodDeclaration.parameters()) {
-                if (obj instanceof SingleVariableDeclaration) {
-                    final ITypeBinding paramTypeBinding = ((SingleVariableDeclaration) obj)
-                            .getType().resolveBinding();
-                    if (paramTypeBinding == null) {
-                        throw new CoreException(new Status(IStatus.ERROR, JUnitPlugin.PLUGIN_ID, IStatus.ERROR,
-                                "Cannot set argument for method" + methodDeclaration.toString(), null));
-                    } else if (paramTypeBinding.isPrimitive()) {
-                        parameters.add(paramTypeBinding.getQualifiedName());
-                    } else {
-                        parameters.add(paramTypeBinding.getBinaryName());
+                final List<String> parameters = new LinkedList<>();
+                for (final Object obj : methodDeclaration.parameters()) {
+                    if (obj instanceof SingleVariableDeclaration) {
+                        final ITypeBinding paramTypeBinding = ((SingleVariableDeclaration) obj)
+                                .getType().resolveBinding();
+                        if (paramTypeBinding == null) {
+                            throw new CoreException(new Status(IStatus.ERROR, JUnitPlugin.PLUGIN_ID, IStatus.ERROR,
+                                    "Cannot set argument for method" + methodDeclaration.toString(), null));
+                        }
+                        parameters.add(formatParameterType(paramTypeBinding));
                     }
                 }
-            }
-            if (parameters.size() > 0) {
-                testName += "(" + String.join(",", parameters) + ")";
+                if (!parameters.isEmpty()) {
+                    testName += "(" + String.join(",", parameters) + ")";
+                }
             }
         }
         final String className = StringUtils.isNotBlank(executionClassName) ? executionClassName :
                 method.getDeclaringType().getFullyQualifiedName();
         return className + ':' + testName;
+    }
+
+    private String formatParameterTypes(IMethodBinding methodBinding) {
+        final List<String> parameters = new LinkedList<>();
+        for (final ITypeBinding parameterType : methodBinding.getParameterTypes()) {
+            parameters.add(formatParameterType(parameterType));
+        }
+        return parameters.isEmpty() ? "" : "(" + String.join(",", parameters) + ")";
+    }
+
+    private String formatParameterType(ITypeBinding parameterType) {
+        return parameterType.isPrimitive() ? parameterType.getQualifiedName() : parameterType.getBinaryName();
     }
 
     private String getExecutionClassName(int index) {
